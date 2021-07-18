@@ -2,6 +2,19 @@ provider "aws" {
 	region = "ap-northeast-2"
 }
 
+
+terraform {
+  backend "s3" {
+	  bucket = "terraform-up-and-running-state-terry"
+	  key = "stage/service/webserver-cluster/terraform.tfstate"
+	  region = "ap-northeast-2"
+
+	  dynamodb_table = "terraform-up-and-running-locks"
+	  encrypt = true
+  }
+}
+
+
 resource "aws_lb_listener_rule" "asg" {
 	listener_arn = aws_lb_listener.http.arn
 	priority = 100
@@ -64,9 +77,10 @@ resource "aws_launch_configuration" "example" {
 	
 	user_data = <<-EOF
 			#!/bin/bash
-			echo "Hello, World" > index.html
+			echo "Hello, World\
+			pass : ${data.terraform_remote_state.db.outputs.pass}" > index.html
 			nohup busybox httpd -f -p ${var.server_port} &
-			EOF 
+			EOF
 
 	lifecycle {
 	  create_before_destroy=true
@@ -91,21 +105,23 @@ resource "aws_autoscaling_group" "example" {
   
 }
 
-resource "aws_instance" "example" {
-	ami = "ami-04876f29fd3a5e8ba"
-	instance_type = "t2.micro"
-	vpc_security_group_ids = [ aws_security_group.instance.id ]
+# resource "aws_instance" "example" {
+# 	ami = "ami-04876f29fd3a5e8ba"
+# 	instance_type = "t2.micro"
+# 	vpc_security_group_ids = [ aws_security_group.instance.id ]
 
-	user_data = <<-EOF
-			#!/bin/bash
-			echo "Hello, World" > index.html
-			nohup busybox httpd -f -p ${var.server_port} &
-			EOF
+# 	user_data = <<-EOF
+# 			#!/bin/bash
+# 			echo "Hello, World\
+# 			pass : ${data.terraform_remote_state.db.outputs.pass}" > index.html
+# 			nohup busybox httpd -f -p ${var.server_port} &
+# 			EOF
 
-	tags = {
-		Name = "terraform-example"
-	}
-}
+
+# 	tags = {
+# 		Name = "terraform-example"
+# 	}
+# }
 
 resource "aws_security_group" "instance" {
 	name = "terraform-example-instance"
@@ -136,15 +152,8 @@ resource "aws_security_group" "alb" {
 	}
   
 }
-variable "server_port" {
-	description = "The port the server will use for HTTP"
-	type	= number
-	default	= 8080
-}
 
-output "alb_dns_name" {
-	value = aws_lb.example.dns_name
-}
+
 
 data "aws_vpc" "default" {
 	default = true
@@ -152,4 +161,15 @@ data "aws_vpc" "default" {
 
 data "aws_subnet_ids" "default" {
 	vpc_id = data.aws_vpc.default.id
+}
+
+data "terraform_remote_state" "db" {
+	backend = "s3"
+
+	config = {
+		bucket = "terraform-up-and-running-state-terry"
+		key = "stage/data-stores/mysql/terraform.tfstate"
+		region = "ap-northeast-2"
+	 }
+  
 }
